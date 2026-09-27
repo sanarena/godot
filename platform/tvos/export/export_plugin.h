@@ -52,6 +52,7 @@ class EditorExportPlatformTVOS : public EditorExportPlatformAppleEmbedded {
 	virtual String _get_iconset_dir_name() const override { return "AppIcon.brandassets"; }
 
 	virtual void get_export_options(List<ExportOption> *r_options) const override;
+	virtual bool get_export_option_visibility(const EditorExportPreset *p_preset, const String &p_option) const override;
 	virtual bool has_valid_export_configuration(const Ref<EditorExportPreset> &p_preset, String &r_error, bool &r_missing_templates, bool p_debug = false) const override;
 
 	virtual Error _export_loading_screen_file(const Ref<EditorExportPreset> &p_preset, const String &p_dest_dir) override;

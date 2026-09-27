@@ -79,6 +79,23 @@ void EditorExportPlatformTVOS::get_export_options(List<ExportOption> *r_options)
 	r_options->push_back(ExportOption(PropertyInfo(Variant::COLOR, "storyboard/custom_bg_color"), Color()));
 }
 
+bool EditorExportPlatformTVOS::get_export_option_visibility(const EditorExportPreset *p_preset, const String &p_option) const {
+	// The device capability toggles are not declared on tvOS at all (see
+	// `_supports_device_capability_options()`); these leftovers have no tvOS
+	// meaning either, so they are hidden rather than silently ignored. There
+	// is no camera, photo library, or third-party microphone recording on
+	// tvOS, no camera template library, and no Files app or file sharing.
+	if (p_option == "privacy/camera_usage_description" ||
+			p_option == "privacy/microphone_usage_description" ||
+			p_option == "privacy/photolibrary_usage_description" ||
+			p_option == "modules/camera" ||
+			p_option == "user_data/accessible_from_files_app" ||
+			p_option == "user_data/accessible_from_itunes_sharing") {
+		return false;
+	}
+	return EditorExportPlatformAppleEmbedded::get_export_option_visibility(p_preset, p_option);
+}
+
 bool EditorExportPlatformTVOS::has_valid_export_configuration(const Ref<EditorExportPreset> &p_preset, String &r_error, bool &r_missing_templates, bool p_debug) const {
 	bool valid = EditorExportPlatformAppleEmbedded::has_valid_export_configuration(p_preset, r_error, r_missing_templates, p_debug);
 
@@ -220,7 +237,8 @@ Error EditorExportPlatformTVOS::_export_icons(const Ref<EditorExportPreset> &p_p
 	// Brand Assets catalog holding layered `.imagestack` app icons and `.imageset` Top Shelf
 	// images. `_get_iconset_dir_name()` already points the base class at
 	// `AppIcon.brandassets`, so `p_iconset_dir` is that catalog and the
-	// `ASSETCATALOG_COMPILER_APPICON_NAME` build setting ("AppIcon") still resolves to it.
+	// The shared template's `ASSETCATALOG_COMPILER_APPICON_NAME` ("AppIcon") already
+	// names this `.brandassets` container, so no build-setting rewrite is needed.
 	const String info_blob = "\"info\":{\"author\":\"xcode\",\"version\":1}";
 
 	Ref<DirAccess> da = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
@@ -387,7 +405,9 @@ Error EditorExportPlatformTVOS::_export_icons(const Ref<EditorExportPreset> &p_p
 			if (!images_json.is_empty()) {
 				images_json += ",";
 			}
-			images_json += vformat("{\"filename\":\"%s\",\"idiom\":\"tv\",\"scale\":\"%s\"}", png_name, scale_str);
+			// No "scale" key: tvOS imagestack layers carry plain tv idiom and actool
+		// infers the scale from the file dimensions (verified against real catalogs).
+		images_json += vformat("{\"filename\":\"%s\",\"idiom\":\"tv\"}", png_name);
 		}
 
 		return write_json(p_dir.path_join("Contents.json"), "{\"images\":[" + images_json + "]," + info_blob + "}");
@@ -429,6 +449,9 @@ Error EditorExportPlatformTVOS::_export_icons(const Ref<EditorExportPreset> &p_p
 		int width;
 		int height;
 	};
+	// Roles and sizes match Xcode's tvOS brandassets (verified against shipping apps):
+	// actool folds the 1280x768 stack into the App Icon as its marketing rendition and
+	// binds the home-screen icon plus Top Shelf images only with these strings.
 	const TopShelfInfo top_shelves[] = {
 		{ "Top Shelf Image.imageset", "top-shelf-image", "1920x720", "icons/tvos_top_shelf", "TopShelf-1920x720", 1920, 720 },
 		{ "Top Shelf Image Wide.imageset", "top-shelf-image-wide", "2320x720", "icons/tvos_top_shelf_wide", "TopShelfWide-2320x720", 2320, 720 },
@@ -582,6 +605,33 @@ String EditorExportPlatformTVOS::_process_config_file_line(const Ref<EditorExpor
 		// Valid Archs
 	} else if (p_line.contains("$valid_archs")) {
 		strnew += p_line.replace("$valid_archs", "arm64 x86_64") + "\n";
+
+		// Info.plist keys with no tvOS meaning. The shared template is written
+		// for iOS and tvOS ignores them, but a couple carry values App Store
+		// validation rejects, so they are dropped instead of emitted. The bare
+		// `<dict/>` and `<true/>` value lines only match when they are the whole
+		// line: no other template file processed here contains one (the `$docs_*`
+		// placeholders expand to `<true/>` too, but those are substituted on
+		// their `$` lines and the result is never rescanned).
+	} else if (p_line.contains("<key>CFBundleIcons</key>") || p_line.contains("<key>CFBundleIcons~ipad</key>")) {
+		strnew += "\n";
+	} else if (p_line.strip_edges() == "<dict/>") {
+		strnew += "\n";
+	} else if (p_line.contains("<key>LSRequiresIPhoneOS</key>") || p_line.contains("<key>UIRequiresFullScreen</key>") || p_line.contains("<key>UIStatusBarHidden</key>")) {
+		strnew += "\n";
+	} else if (p_line.strip_edges() == "<true/>") {
+		strnew += "\n";
+	} else if (p_line.contains("CADisableMinimumFrameDurationOnPhone")) {
+		strnew += "\n";
+	} else if (p_line.contains("<key>NSCameraUsageDescription</key>") || p_line.contains("<key>NSPhotoLibraryUsageDescription</key>") || p_line.contains("<key>NSMicrophoneUsageDescription</key>")) {
+		strnew += "\n";
+	} else if (p_line.contains("$camera_usage_description") || p_line.contains("$microphone_usage_description") || p_line.contains("$photolibrary_usage_description")) {
+		strnew += "\n";
+	} else if (p_line.contains("$ipad_interface_orientations")) { // No iPad idiom on tvOS; the base landscape key matches Apple's tvOS template.
+		strnew += "\n";
+		// NOTE: `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` from the shared template is
+		// already correct for tvOS: it names the `.brandassets` container, and actool finds
+		// the `appicon`-role stack inside it. Do not rewrite it to the stack name.
 
 		// Application Scene Manifest - Default Session Role
 	} else if (p_line.contains("$application_scene_manifest_default_session_role")) {
