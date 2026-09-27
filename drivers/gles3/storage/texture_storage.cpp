@@ -57,6 +57,26 @@ static const GLenum _cube_side_enum[6] = {
 	GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
 };
 
+// Images larger than GL_MAX_TEXTURE_SIZE fail to upload and the texture then
+// samples black, with no error anywhere. Shrink them to fit so they render,
+// and say so loudly enough that the art can be fixed at the source.
+static Ref<Image> _fit_image_to_limits(const Ref<Image> &p_image) {
+	int max_size = Config::get_singleton()->max_texture_size;
+	if (max_size <= 0 || (p_image->get_width() <= max_size && p_image->get_height() <= max_size)) {
+		return p_image;
+	}
+	if (p_image->is_compressed() && !p_image->has_mipmaps()) {
+		ERR_PRINT("Texture of size " + itos(p_image->get_width()) + "x" + itos(p_image->get_height()) + " exceeds the maximum texture size of " + itos(max_size) + "x" + itos(max_size) + " of this GPU, and it cannot be downscaled because it is VRAM-compressed without mipmaps. It will render black. Reimport it smaller or without VRAM compression.");
+		return p_image;
+	}
+	Ref<Image> img = p_image->duplicate();
+	while (img->get_width() > max_size || img->get_height() > max_size) {
+		img->shrink_x2();
+	}
+	ERR_PRINT("Texture of size " + itos(p_image->get_width()) + "x" + itos(p_image->get_height()) + " exceeds the maximum texture size of " + itos(max_size) + "x" + itos(max_size) + " of this GPU, so it was downscaled to " + itos(img->get_width()) + "x" + itos(img->get_height()) + " to fit. It renders now, but ship the art smaller to keep full quality.");
+	return img;
+}
+
 TextureStorage::TextureStorage() {
 	singleton = this;
 
@@ -1062,22 +1082,24 @@ void TextureStorage::texture_free(RID p_texture) {
 void TextureStorage::texture_2d_initialize(RID p_texture, const Ref<Image> &p_image) {
 	ERR_FAIL_COND(p_image.is_null());
 
+	Ref<Image> img = _fit_image_to_limits(p_image);
+
 	Texture texture;
-	texture.width = p_image->get_width();
-	texture.height = p_image->get_height();
+	texture.width = img->get_width();
+	texture.height = img->get_height();
 	texture.alloc_width = texture.width;
 	texture.alloc_height = texture.height;
-	texture.mipmaps = p_image->get_mipmap_count() + 1;
-	texture.format = p_image->get_format();
+	texture.mipmaps = img->get_mipmap_count() + 1;
+	texture.format = img->get_format();
 	texture.type = Texture::TYPE_2D;
 	texture.target = GL_TEXTURE_2D;
 	_get_gl_image_and_format(Ref<Image>(), texture.format, texture.real_format, texture.gl_format_cache, texture.gl_internal_format_cache, texture.gl_type_cache, texture.compressed, false);
-	texture.total_data_size = p_image->get_image_data_size(texture.width, texture.height, texture.format, texture.mipmaps);
+	texture.total_data_size = img->get_image_data_size(texture.width, texture.height, texture.format, texture.mipmaps);
 	texture.active = true;
 	glGenTextures(1, &texture.tex_id);
 	GLES3::Utilities::get_singleton()->texture_allocated_data(texture.tex_id, texture.total_data_size, "Texture 2D");
 	texture_owner.initialize_rid(p_texture, texture);
-	texture_set_data(p_texture, p_image);
+	texture_set_data(p_texture, img);
 }
 
 void TextureStorage::texture_external_initialize(RID p_texture, int p_width, int p_height, uint64_t p_external_buffer) {
@@ -1128,7 +1150,6 @@ void TextureStorage::texture_2d_layered_initialize(RID p_texture, const Vector<R
 	ERR_FAIL_COND(p_layered_type == RSE::TEXTURE_LAYERED_CUBEMAP && p_layers.size() != 6);
 	ERR_FAIL_COND_MSG(p_layered_type == RSE::TEXTURE_LAYERED_CUBEMAP_ARRAY, "Cubemap Arrays are not supported in the Compatibility renderer.");
 
-	const Ref<Image> &image = p_layers[0];
 	{
 		int valid_width = 0;
 		int valid_height = 0;
@@ -1152,25 +1173,32 @@ void TextureStorage::texture_2d_layered_initialize(RID p_texture, const Vector<R
 		}
 	}
 
+	Vector<Ref<Image>> layers;
+	layers.resize(p_layers.size());
+	for (int i = 0; i < p_layers.size(); i++) {
+		layers.write[i] = _fit_image_to_limits(p_layers[i]);
+	}
+	const Ref<Image> &fitted = layers[0];
+
 	Texture texture;
-	texture.width = image->get_width();
-	texture.height = image->get_height();
+	texture.width = fitted->get_width();
+	texture.height = fitted->get_height();
 	texture.alloc_width = texture.width;
 	texture.alloc_height = texture.height;
-	texture.mipmaps = image->get_mipmap_count() + 1;
-	texture.format = image->get_format();
+	texture.mipmaps = fitted->get_mipmap_count() + 1;
+	texture.format = fitted->get_format();
 	texture.type = Texture::TYPE_LAYERED;
 	texture.layered_type = p_layered_type;
 	texture.target = p_layered_type == RSE::TEXTURE_LAYERED_CUBEMAP ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D_ARRAY;
-	texture.layers = p_layers.size();
+	texture.layers = layers.size();
 	_get_gl_image_and_format(Ref<Image>(), texture.format, texture.real_format, texture.gl_format_cache, texture.gl_internal_format_cache, texture.gl_type_cache, texture.compressed, false);
-	texture.total_data_size = p_layers[0]->get_image_data_size(texture.width, texture.height, texture.format, texture.mipmaps) * texture.layers;
+	texture.total_data_size = layers[0]->get_image_data_size(texture.width, texture.height, texture.format, texture.mipmaps) * texture.layers;
 	texture.active = true;
 	glGenTextures(1, &texture.tex_id);
 	GLES3::Utilities::get_singleton()->texture_allocated_data(texture.tex_id, texture.total_data_size, "Texture Layered");
 	texture_owner.initialize_rid(p_texture, texture);
-	for (int i = 0; i < p_layers.size(); i++) {
-		_texture_set_data(p_texture, p_layers[i], i, i == 0);
+	for (int i = 0; i < layers.size(); i++) {
+		_texture_set_data(p_texture, layers[i], i, i == 0);
 	}
 }
 
