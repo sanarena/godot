@@ -887,8 +887,17 @@ void SceneTree::finalize() {
 void SceneTree::quit(int p_exit_code) {
 	_THREAD_SAFE_METHOD_
 
+#ifdef APPLE_EMBEDDED_ENABLED
+	// Apple forbids programmatic termination: the system suspends the app to
+	// the Home screen instead, so quitting here would only ever look like a
+	// crash. tvOS leaves through the Menu flow (see quit_on_go_back), which
+	// hands the press back to UIKit rather than exiting.
+	WARN_PRINT("SceneTree.quit() is a no-op on this platform; the app stays resident and the system suspends it.");
+	return;
+#else
 	OS::get_singleton()->set_exit_code(p_exit_code);
 	_quit = true;
+#endif
 }
 
 void SceneTree::_main_window_close() {

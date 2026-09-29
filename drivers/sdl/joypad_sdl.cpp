@@ -66,6 +66,12 @@ JoypadSDL::~JoypadSDL() {
 Error JoypadSDL::initialize() {
 	SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
 	SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+#ifdef TVOS_ENABLED
+	// The Siri Remote is handled as dedicated UIPress key input (see
+	// GDTViewController); opening it as a joystick too would report every
+	// press twice. Non-remote gamepads are unaffected by this hint.
+	SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "0");
+#endif
 	ERR_FAIL_COND_V_MSG(!SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD), FAILED, SDL_GetError());
 
 	// Add Godot's mapping database from memory

@@ -68,7 +68,21 @@
 }
 
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
-#ifndef TVOS_ENABLED
+#ifdef TVOS_ENABLED
+	// Menu pairs with the pressesEnded branch below: when the app quits on
+	// go-back, UIKit must see began as well or it drops the ended and the
+	// app never suspends. (On tvOS the Escape key reports as Menu too.)
+	for (UIPress *press in presses) {
+		if (press.type == UIPressTypeMenu) {
+			SceneTree *scene = SceneTree::get_singleton();
+			if (scene && scene->is_quit_on_go_back()) {
+				[super pressesBegan:presses withEvent:event];
+				return;
+			}
+			break;
+		}
+	}
+#else
 	[super pressesBegan:presses
 			  withEvent:event];
 #endif
@@ -76,12 +90,17 @@
 	if (!DisplayServerAppleEmbedded::get_singleton() || DisplayServerAppleEmbedded::get_singleton()->is_keyboard_active()) {
 		return;
 	}
-#if defined(TVOS_ENABLED) && defined(TVOS_SIMULATOR)
-	// Simulator only: on device the remote arrives through SDL as a joystick
-	// (clicks, swipes, and buttons), so mapping presses to keys as well would
-	// report every press twice. The Simulator has no GameController remote, so
-	// synthesize key events here instead; presses without a key come from the
-	// (virtual) remote rather than a hardware keyboard. Menu is handled below.
+#ifdef TVOS_ENABLED
+	// Dedicated Siri Remote support: the remote arrives as UIPresses (clicks,
+	// swipes, and buttons), synthesized to keys here on both simulator and
+	// device. SDL's Siri-remote-as-joystick is disabled (see
+	// SDL_HINT_TV_REMOTE_AS_JOYSTICK in JoypadSDL), otherwise every press
+	// would report twice - and a doubled pause toggles play state twice,
+	// which is no toggle at all. Presses without a key come from the remote
+	// rather than a hardware keyboard; non-remote gamepads still arrive
+	// through SDL as joysticks. Menu is handled below. Play/Pause becomes
+	// MEDIAPLAY, the key games bind for pausing (SPACE would drop whatever
+	// the action button drops).
 	for (UIPress *press in presses) {
 		if (press.key != nil) {
 			continue;
@@ -104,7 +123,7 @@
 				key = Key::ENTER;
 				break;
 			case UIPressTypePlayPause:
-				key = Key::SPACE;
+				key = Key::MEDIAPLAY;
 				break;
 			default:
 				break;
@@ -149,7 +168,11 @@
 		if (press.type == UIPressTypeMenu) {
 			SceneTree *scene = SceneTree::get_singleton();
 			if (scene && scene->is_quit_on_go_back()) {
-				// Let UIKit process the event.
+				// Let UIKit process the event. NOTE: on current tvOS a
+				// short Menu press at the app root is a system no-op (even
+				// an app with no presses overrides stays foreground); the
+				// user leaves via the TV/Home button, which suspends the
+				// app without involving this code.
 				[super pressesEnded:presses withEvent:event];
 			} else if (DisplayServerAppleEmbedded::get_singleton()) {
 				DisplayServerAppleEmbedded::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_GO_BACK_REQUEST);
@@ -165,7 +188,7 @@
 	if (!DisplayServerAppleEmbedded::get_singleton() || DisplayServerAppleEmbedded::get_singleton()->is_keyboard_active()) {
 		return;
 	}
-#if defined(TVOS_ENABLED) && defined(TVOS_SIMULATOR)
+#ifdef TVOS_ENABLED
 	for (UIPress *press in presses) {
 		if (press.key != nil) {
 			continue;
@@ -188,7 +211,7 @@
 				key = Key::ENTER;
 				break;
 			case UIPressTypePlayPause:
-				key = Key::SPACE;
+				key = Key::MEDIAPLAY;
 				break;
 			default:
 				break;
@@ -218,6 +241,22 @@
 		}
 	}
 }
+
+#ifdef TVOS_ENABLED
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+	// The system stole the presses (Siri, Control Center, app resigning);
+	// pressesEnded will not follow. Release every synthesized remote key so
+	// none stays stuck down. Spare key-ups for keys that are not down are
+	// harmless. Menu never synthesizes a key, so it needs no release.
+	if (!DisplayServerAppleEmbedded::get_singleton()) {
+		return;
+	}
+	const Key keys[] = { Key::UP, Key::DOWN, Key::LEFT, Key::RIGHT, Key::ENTER, Key::MEDIAPLAY };
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		DisplayServerAppleEmbedded::get_singleton()->key(keys[i], 0, keys[i], keys[i], 0, false, KeyLocation::UNSPECIFIED);
+	}
+}
+#endif
 
 - (void)loadView {
 	GDTView *view = GDTViewCreate();
@@ -252,6 +291,16 @@
 
 - (void)godot_commonInit {
 	// Initialize view controller values.
+#ifdef TVOS_ENABLED
+	// GDTViewController is a GCEventViewController on tvOS. With user
+	// interaction enabled (the default) it consumes the Menu button as a
+	// controller pause event, so Menu can never suspend the app - even when
+	// pressesBegan/pressesEnded forward it to super for quit_on_go_back.
+	// Disable it: Menu then reaches the system default (suspend at root),
+	// MFi controllers are unaffected (SDL reads GCController directly), and
+	// Godot's UI does not use UIKit focus anyway.
+	self.controllerUserInteractionEnabled = NO;
+#endif
 }
 
 - (void)didReceiveMemoryWarning {

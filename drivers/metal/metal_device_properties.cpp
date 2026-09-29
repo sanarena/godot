@@ -106,6 +106,11 @@ void MetalDeviceProperties::init_features(MTL::Device *p_device) {
 		}
 	}
 
+	// NOTE: MTLSimDevice only reports the Common1/Apple1 families with no
+	// argument buffer support, so Forward+/Mobile cannot run on the simulator
+	// regardless of the host GPU. These queries intentionally read the device
+	// truthfully so simulator runs fail at the capability gate with a clear
+	// message instead of misrendering under an emulated feature set.
 	features.highestFamily = MTL::GPUFamilyApple1;
 	for (MTL::GPUFamily family = GPUFamilyApple9; family >= MTL::GPUFamilyApple1; --family) {
 		if (p_device->supportsFamily(family)) {

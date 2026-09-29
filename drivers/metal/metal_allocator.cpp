@@ -30,6 +30,10 @@
 
 #include "drivers/metal/metal_allocator.h"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace {
 
 class SpinLockGuard {
@@ -294,6 +298,16 @@ void MetalHeapAllocator::_free_allocation(MetalAllocation &p_allocation) {
 
 MetalBuffer MetalHeapAllocator::new_buffer(NS::UInteger p_length, MTL::ResourceOptions p_options) {
 	uint32_t pool_index = _pool_for_options(p_options);
+#if defined(__APPLE__) && TARGET_OS_SIMULATOR
+	// MTLSimDevice only allows StorageModePrivate heaps, so shared resources
+	// are allocated as committed resources instead of placed ones. The INVALID
+	// allocation handle means free_buffer only releases the buffer.
+	if (pool_index != POOL_PRIVATE) {
+		MetalBuffer result;
+		result.buffer = NS::TransferPtr(device->newBuffer(p_length, p_options));
+		return result;
+	}
+#endif
 	MTL::SizeAndAlign sa = device->heapBufferSizeAndAlign(p_length, p_options);
 	// Placement-heap resources inherit the heap's hazard tracking; strip
 	// hazard bits and pass storage/cache + untracked only.
@@ -321,6 +335,14 @@ MetalBuffer MetalHeapAllocator::new_buffer(NS::UInteger p_length, MTL::ResourceO
 
 MetalTexture MetalHeapAllocator::new_texture(const MTL::TextureDescriptor *p_desc) {
 	uint32_t pool_index = _pool_for_texture(p_desc);
+#if defined(__APPLE__) && TARGET_OS_SIMULATOR
+	// MTLSimDevice only allows StorageModePrivate heaps; see new_buffer.
+	if (pool_index != POOL_PRIVATE) {
+		MetalTexture result;
+		result.texture = NS::TransferPtr(device->newTexture(p_desc));
+		return result;
+	}
+#endif
 	MTL::SizeAndAlign sa = device->heapTextureSizeAndAlign(p_desc);
 
 	MetalTexture result;

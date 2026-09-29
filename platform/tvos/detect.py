@@ -144,9 +144,11 @@ def configure(env: "SConsEnvironment"):
         print_warning("The tvOS platform does not support the Vulkan rendering driver")
         env["vulkan"] = False
 
-    if env["metal"] and env["simulator"]:
-        print_warning("tvOS Simulator does not support the Metal rendering driver")
-        env["metal"] = False
+    # Keep Metal enabled on the simulator: the driver builds, links (see the
+    # simulator shims in drivers/metal), and fails gracefully at the device
+    # capability gate, since MTLSimDevice only reports Common1/Apple1 with no
+    # argument buffers. Forward+/Mobile rendering still needs a real Apple TV;
+    # pass metal=no to build a GLES-only simulator template.
 
     if env["metal"]:
         env.AppendUnique(CPPDEFINES=["METAL_ENABLED", "RD_ENABLED"])

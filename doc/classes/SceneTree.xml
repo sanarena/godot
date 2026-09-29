@@ -204,6 +204,7 @@
 			<param index="0" name="exit_code" type="int" default="0" />
 			<description>
 				Quits the application at the end of the current iteration, with the given [param exit_code].
+				On iOS, tvOS and visionOS this is a no-op that logs a warning: apps may not terminate themselves, the system suspends them instead.
 				By convention, an exit code of [code]0[/code] indicates success, whereas any other exit code indicates an error. For portability reasons, it should be between [code]0[/code] and [code]125[/code] (inclusive).
 				[b]Note:[/b] On iOS this method doesn't work. Instead, as recommended by the [url=https://developer.apple.com/library/archive/qa/qa1561/_index.html]iOS Human Interface Guidelines[/url], the user is expected to close apps via the Home button.
 			</description>

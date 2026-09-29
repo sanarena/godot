@@ -396,7 +396,17 @@ Error OS_AppleEmbedded::shell_open(const String &p_uri) {
 String OS_AppleEmbedded::get_user_data_dir(const String &p_user_dir) const {
 	static String ret;
 	if (ret.is_empty()) {
+#if defined(TVOS_ENABLED)
+		// tvOS sandbox denies file creation in the app's Documents directory
+		// (EPERM despite mobile ownership and 0755; verified on-device), while
+		// Library/Caches and tmp/ are writable. Point user:// at Caches so
+		// saves, logs and settings work. Note Caches may be purged by the
+		// system under storage pressure; games needing durable cloud saves
+		// should use iCloud key-value storage instead.
+		NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+#else
 		NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+#endif
 		if (paths && [paths count] >= 1) {
 			ret.append_utf8([[paths firstObject] UTF8String]);
 		}

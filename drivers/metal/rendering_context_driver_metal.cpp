@@ -42,6 +42,20 @@
 #include <os/log.h>
 #include <os/signpost.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_SIMULATOR
+// The simulator Metal SDK omits MTLTensorDomain and MTLIOErrorDomain (shipped
+// device-only), but metal-cpp defines globals referencing them. Provide weak
+// definitions so Metal-enabled simulator builds link. They are never used at
+// runtime (Godot does not call the tensor/IO-error APIs); if a future SDK adds
+// the real symbols, its strong definitions take precedence over these weak ones.
+struct NSString;
+__attribute__((weak)) extern NSString *const MTLTensorDomain = nullptr;
+__attribute__((weak)) extern NSString *const MTLIOErrorDomain = nullptr;
+#endif
+#endif
+
 #if defined(VISIONOS_ENABLED) && defined(MODULE_VISIONOS_XR_ENABLED)
 #include "modules/visionos_xr/visionos_xr_interface.h"
 #include "platform/visionos/render_mode_visionos.h"
