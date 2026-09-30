@@ -146,9 +146,10 @@ def configure(env: "SConsEnvironment"):
 
     # Keep Metal enabled on the simulator: the driver builds, links (see the
     # simulator shims in drivers/metal), and fails gracefully at the device
-    # capability gate, since MTLSimDevice only reports Common1/Apple1 with no
-    # argument buffers. Forward+/Mobile rendering still needs a real Apple TV;
-    # pass metal=no to build a GLES-only simulator template.
+    # capability gate, since MTLSimDevice only reports Apple1/Apple2 (verified
+    # with a native probe; tier-1 argument buffers, no image cube arrays).
+    # Forward+/Mobile rendering still needs a real Apple TV with an Apple4+
+    # GPU; pass metal=no to build a GLES-only simulator template.
 
     if env["metal"]:
         env.AppendUnique(CPPDEFINES=["METAL_ENABLED", "RD_ENABLED"])

@@ -299,9 +299,10 @@ void MetalHeapAllocator::_free_allocation(MetalAllocation &p_allocation) {
 MetalBuffer MetalHeapAllocator::new_buffer(NS::UInteger p_length, MTL::ResourceOptions p_options) {
 	uint32_t pool_index = _pool_for_options(p_options);
 #if defined(__APPLE__) && TARGET_OS_SIMULATOR
-	// MTLSimDevice only allows StorageModePrivate heaps, so shared resources
-	// are allocated as committed resources instead of placed ones. The INVALID
-	// allocation handle means free_buffer only releases the buffer.
+	// MTLSimDevice only allows StorageModePrivate heaps (a shared heap aborts
+	// in newHeapWithDescriptor, verified with a native probe), so shared
+	// resources are allocated as committed resources instead of placed ones.
+	// The INVALID allocation handle means free_buffer only releases the buffer.
 	if (pool_index != POOL_PRIVATE) {
 		MetalBuffer result;
 		result.buffer = NS::TransferPtr(device->newBuffer(p_length, p_options));
