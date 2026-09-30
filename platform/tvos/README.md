@@ -36,28 +36,30 @@ scons platform=tvos target=template_release arch=arm64 simulator=yes opengl3=yes
 - **Compatibility renderer (OpenGL ES 3.0)** on device and simulator. This is
   the renderer to ship: it runs on every Apple TV including the A10X models.
 - **Siri Remote as key events**, on device and in the simulator. Trackpad
-  swipes and clicks arrive as ordinary `InputEventKey`, so the default UI
+  touches and clicks arrive as ordinary `InputEventKey`, so the default UI
   navigation (`ui_up`/`ui_down`/`ui_left`/`ui_right`/`ui_accept`) and the
   arrow/Enter bindings just work:
 
   | Remote button | Godot key |
   |---|---|
-  | Swipe up / down / left / right | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
+  | Touch dragged up / down / left / right (held until lift) | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
   | Click (Select) | `KEY_ENTER` |
   | Play/Pause | `KEY_MEDIAPLAY` |
-  | Menu | See below (never a key) |
+  | Menu | `KEY_MENU` down/up, plus the go-back request (see below) |
 
   The remote is *not* exposed as a joystick (SDL remote-as-joystick is off),
   so presses never arrive twice. MFi game controllers keep working through
-  the standard Godot joypad API. Each swipe is one discrete tap (held
-  ~120 ms so per-frame polling sees it, released with no repeat), the way
-  tvOS moves focus a step per swipe.
+  the standard Godot joypad API. A touch holds its arrow key until it lifts
+  (menus step once per touch, keys never repeat); a flick too quick for
+  per-frame polling still lands through a 120 ms minimum hold.
 - **Menu button behavior.** With `quit_on_go_back` enabled (the default), the
   Menu press is handed back to UIKit, preserving the system Menu-to-Home flow.
-  With it disabled, the app receives `NOTIFICATION_WM_GO_BACK_REQUEST`
-  (the `WINDOW_EVENT_GO_BACK_REQUEST` window event) instead of suspending.
-  Stuck keys are released if the system takes the press stream
-  (`pressesCancelled`).
+  With it disabled, the app receives `KEY_MENU` going down, `KEY_MENU` going
+  up, and then `NOTIFICATION_WM_GO_BACK_REQUEST`
+  (the `WINDOW_EVENT_GO_BACK_REQUEST` window event) instead of suspending,
+  so taps and holds tell apart. A hardware Escape key reports as Menu too
+  but keeps the old request-only path (no `KEY_MENU`). Stuck keys are
+  released if the system takes the press stream (`pressesCancelled`).
 - **Metal renderer profiles (Forward+/Mobile).** The tvOS GPU-family/MSL
   profiles, the `appletvos` shader toolchain, and device capability detection
   are implemented. On GPUs older than Apple family 4 the engine shows an
@@ -116,8 +118,9 @@ All of the following was verified in Sep 2026 against this branch:
   Apple2 gate alerts, and a native probe characterizing `MTLSimDevice`
   (families, argument-buffer tier, heap behavior).
 - **Headless suite:** BubblyField `tests/tvos_remote_regression.gd`
-  (113 checks: input map, remote buttons, pause/back routing, menu
-  navigation, walking, bubbles, window suspend/resume) passes.
+  (123 checks: input map, remote buttons, Menu key tap/hold case use,
+  pause/back routing, menu navigation, walking, bubbles, window
+  suspend/resume) passes.
 - **Builds:** all four tvOS templates (release/debug x device/simulator,
   GLES3 + Metal) and the iOS release template compile cleanly.
 
@@ -129,5 +132,7 @@ All of the following was verified in Sep 2026 against this branch:
 - Physical MFi controllers (no hardware available; the SDL hint change is
   remote-specific by API).
 - The `pressesCancelled` stuck-key path (no deterministic trigger exists).
+- Touch-hold-until-lift and `KEY_MENU` tap/hold on a physical remote (both
+  ship in this branch; headless-covered, on-TV confirmation pending).
 - App Store submission and validation of an exported tvOS app.
 - tvOS versions other than the tested 26.x device / 26.5–27 simulators.
