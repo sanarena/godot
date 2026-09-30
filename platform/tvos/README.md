@@ -20,6 +20,17 @@ The compiling and exporting process is the same as on iOS, but replacing the
 - [Exporting for iOS](https://docs.godotengine.org/en/latest/tutorials/export/exporting_for_ios.html)
   - Instructions on using the compiled export templates to export a project.
 
+Build the four template libraries with `opengl3=yes` (off by default on
+this platform); without it the Compatibility renderer is missing and every
+game falls back to the Metal capability gate:
+
+```
+scons platform=tvos target=template_debug arch=arm64 opengl3=yes
+scons platform=tvos target=template_release arch=arm64 opengl3=yes
+scons platform=tvos target=template_debug arch=arm64 simulator=yes opengl3=yes
+scons platform=tvos target=template_release arch=arm64 simulator=yes opengl3=yes
+```
+
 ## Supported
 
 - **Compatibility renderer (OpenGL ES 3.0)** on device and simulator. This is
@@ -38,7 +49,9 @@ The compiling and exporting process is the same as on iOS, but replacing the
 
   The remote is *not* exposed as a joystick (SDL remote-as-joystick is off),
   so presses never arrive twice. MFi game controllers keep working through
-  the standard Godot joypad API.
+  the standard Godot joypad API. Each swipe is one discrete tap (held
+  ~120 ms so per-frame polling sees it, released with no repeat), the way
+  tvOS moves focus a step per swipe.
 - **Menu button behavior.** With `quit_on_go_back` enabled (the default), the
   Menu press is handed back to UIKit, preserving the system Menu-to-Home flow.
   With it disabled, the app receives `NOTIFICATION_WM_GO_BACK_REQUEST`
@@ -103,7 +116,7 @@ All of the following was verified in Sep 2026 against this branch:
   Apple2 gate alerts, and a native probe characterizing `MTLSimDevice`
   (families, argument-buffer tier, heap behavior).
 - **Headless suite:** BubblyField `tests/tvos_remote_regression.gd`
-  (101 checks: input map, remote buttons, pause/back routing, menu
+  (113 checks: input map, remote buttons, pause/back routing, menu
   navigation, walking, bubbles, window suspend/resume) passes.
 - **Builds:** all four tvOS templates (release/debug x device/simulator,
   GLES3 + Metal) and the iOS release template compile cleanly.

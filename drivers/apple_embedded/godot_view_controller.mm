@@ -313,11 +313,75 @@
 
 	[self observeKeyboard];
 	[self displayLoadingOverlay];
+#ifdef TVOS_ENABLED
+	[self godot_setupSwipeGestures];
+#endif
 
 #ifndef TVOS_ENABLED
 	[self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
 #endif
 }
+
+#ifdef TVOS_ENABLED
+// Siri Remote swipes arrive as touch gestures, not UIPresses, so the key
+// synthesis in pressesBegan never sees them: without this a swipe-only
+// remote (1st generation touch surface) cannot move at all, and clickpad
+// users lose the gesture tvOS itself navigates by. Each swipe becomes one
+// arrow-key tap, the way tvOS moves focus a step per swipe. The press is
+// held briefly rather than released at once: per-frame polling (rounds
+// read movement through Input.get_vector) never sees a press that comes
+// and goes inside one frame. The recognizers only observe
+// (cancelsTouchesInView = NO), so games reading raw touches see the same
+// stream as before.
+- (void)godot_setupSwipeGestures {
+	UISwipeGestureRecognizerDirection directions[] = {
+		UISwipeGestureRecognizerDirectionUp,
+		UISwipeGestureRecognizerDirectionDown,
+		UISwipeGestureRecognizerDirectionLeft,
+		UISwipeGestureRecognizerDirectionRight,
+	};
+	for (size_t i = 0; i < sizeof(directions) / sizeof(directions[0]); i++) {
+		UISwipeGestureRecognizer *swipe = [[UISwipeGestureRecognizer alloc]
+				initWithTarget:self
+						action:@selector(godot_swipe:)];
+		swipe.direction = directions[i];
+		swipe.cancelsTouchesInView = NO;
+		[self.view addGestureRecognizer:swipe];
+	}
+}
+
+- (void)godot_swipe:(UISwipeGestureRecognizer *)recognizer {
+	if (!DisplayServerAppleEmbedded::get_singleton()) {
+		return;
+	}
+	Key key = Key::NONE;
+	switch (recognizer.direction) {
+		case UISwipeGestureRecognizerDirectionUp:
+			key = Key::UP;
+			break;
+		case UISwipeGestureRecognizerDirectionDown:
+			key = Key::DOWN;
+			break;
+		case UISwipeGestureRecognizerDirectionLeft:
+			key = Key::LEFT;
+			break;
+		case UISwipeGestureRecognizerDirectionRight:
+			key = Key::RIGHT;
+			break;
+		default:
+			break;
+	}
+	if (key == Key::NONE) {
+		return;
+	}
+	DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, true, KeyLocation::UNSPECIFIED);
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		if (DisplayServerAppleEmbedded::get_singleton()) {
+			DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, false, KeyLocation::UNSPECIFIED);
+		}
+	});
+}
+#endif
 
 - (void)viewDidAppear:(BOOL)animated {
 	[super viewDidAppear:animated];
