@@ -42,23 +42,24 @@ scons platform=tvos target=template_release arch=arm64 simulator=yes opengl3=yes
 
   | Remote button | Godot key |
   |---|---|
-  | Touch dragged up / down / left / right (held until lift) | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
+  | Touch dragged up / down / left / right, corners holding two (held until lift) | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
   | Click (Select) | `KEY_ENTER` |
   | Play/Pause | `KEY_MEDIAPLAY` |
   | Menu | `KEY_MENU` down/up, plus the go-back request (see below) |
 
   The remote is *not* exposed as a joystick (SDL remote-as-joystick is off),
   so presses never arrive twice. MFi game controllers keep working through
-  the standard Godot joypad API. A touch holds its arrow key until it lifts
-  (menus step once per touch, keys never repeat); a flick too quick for
-  per-frame polling still lands through a 120 ms minimum hold.
+  the standard Godot joypad API. Each touch axis holds its arrow key until
+  the touch lifts, following the finger around (corners hold two keys);
+  menus step once per touch since keys never repeat, while a flick too
+  quick for per-frame polling still lands through a 120 ms minimum hold.
 - **Menu button behavior.** With `quit_on_go_back` enabled (the default), the
   Menu press is handed back to UIKit, preserving the system Menu-to-Home flow.
   With it disabled, the app receives `KEY_MENU` going down, `KEY_MENU` going
   up, and then `NOTIFICATION_WM_GO_BACK_REQUEST`
   (the `WINDOW_EVENT_GO_BACK_REQUEST` window event) instead of suspending,
-  so taps and holds tell apart. A hardware Escape key reports as Menu too
-  but keeps the old request-only path (no `KEY_MENU`). Stuck keys are
+  so taps and holds tell apart. Menu never doubles as a hardware key: a
+  hardware Escape reports as Menu too, and acts as one. Stuck keys are
   released if the system takes the press stream (`pressesCancelled`).
 - **Metal renderer profiles (Forward+/Mobile).** The tvOS GPU-family/MSL
   profiles, the `appletvos` shader toolchain, and device capability detection

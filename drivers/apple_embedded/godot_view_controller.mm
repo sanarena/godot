@@ -50,12 +50,16 @@
 
 @interface GDTViewController () <GDTViewDelegate> {
 #ifdef TVOS_ENABLED
-	// The arrow key a touch-hold (see godot_pan:) currently keeps down, when it
+	// What a touch-hold (see godot_pan:) keeps down per axis: the key, when it
 	// went down for the minimum hold, and which press that was, so a delayed
-	// release never lets go of a newer touch's key. NONE while no touch holds one.
-	Key _pan_key;
-	uint64_t _pan_down_ms;
-	uint64_t _pan_gen;
+	// release never lets go of a newer touch's key. NONE while held by nothing.
+	struct PanAxisHold {
+		Key key;
+		uint64_t down_ms;
+		uint64_t gen;
+	};
+	PanAxisHold _pan_x;
+	PanAxisHold _pan_y;
 #endif
 }
 
@@ -90,9 +94,9 @@
 			}
 			// The game holds Menu itself: down as the Menu key now, up with
 			// the go-back request in pressesEnded, so taps and holds tell
-			// apart. Remote only (press.key == nil): a hardware Escape
-			// reports as Menu too and keeps its old request-only path.
-			if (press.key == nil && DisplayServerAppleEmbedded::get_singleton()) {
+			// apart. Every Menu press, whatever key the system hangs on it
+			// (a hardware Escape reports as Menu too, and acts as one).
+			if (DisplayServerAppleEmbedded::get_singleton()) {
 				DisplayServerAppleEmbedded::get_singleton()->key(Key::MENU, 0, Key::MENU, Key::MENU, 0, true, KeyLocation::UNSPECIFIED);
 			}
 			break;
@@ -151,6 +155,11 @@
 #endif
 	if (@available(iOS 13.4, *)) {
 		for (UIPress *press in presses) {
+			// Menu is synthesized as the Menu key above; it must never
+			// double as whatever key the system hangs on the press.
+			if (press.type == UIPressTypeMenu) {
+				continue;
+			}
 			String u32lbl = String::utf8([press.key.charactersIgnoringModifiers UTF8String]);
 			String u32text = String::utf8([press.key.characters UTF8String]);
 			Key key = KeyMappingAppleEmbedded::remap_key(press.key.keyCode);
@@ -191,9 +200,7 @@
 				// app without involving this code.
 				[super pressesEnded:presses withEvent:event];
 			} else if (DisplayServerAppleEmbedded::get_singleton()) {
-				if (press.key == nil) {
-					DisplayServerAppleEmbedded::get_singleton()->key(Key::MENU, 0, Key::MENU, Key::MENU, 0, false, KeyLocation::UNSPECIFIED);
-				}
+				DisplayServerAppleEmbedded::get_singleton()->key(Key::MENU, 0, Key::MENU, Key::MENU, 0, false, KeyLocation::UNSPECIFIED);
 				DisplayServerAppleEmbedded::get_singleton()->send_window_event(DisplayServerEnums::WINDOW_EVENT_GO_BACK_REQUEST);
 			}
 			return;
@@ -242,6 +249,11 @@
 #endif
 	if (@available(iOS 13.4, *)) {
 		for (UIPress *press in presses) {
+			// Menu is synthesized as the Menu key above; it must never
+			// double as whatever key the system hangs on the press.
+			if (press.type == UIPressTypeMenu) {
+				continue;
+			}
 			String u32lbl = String::utf8([press.key.charactersIgnoringModifiers UTF8String]);
 			Key key = KeyMappingAppleEmbedded::remap_key(press.key.keyCode);
 
@@ -345,10 +357,11 @@
 // Siri Remote touches arrive as gestures, not UIPresses, so the key
 // synthesis in pressesBegan never sees them: without this a swipe-only
 // remote (1st generation touch surface) cannot move at all, and clickpad
-// users lose the gesture tvOS itself navigates by. A touch dragged past
-// 24 points holds the arrow key of its dominant direction until it lifts,
-// so menus step once per touch (keys never repeat) while rounds keep
-// walking for as long as the touch stays down. A flick too quick for
+// users lose the gesture tvOS itself navigates by. The touch steers like
+// the stick the remote used to be: each axis past 24 points from where it
+// landed holds its arrow key - both for a corner - following the finger
+// around until it lifts, so rounds keep walking the held way while menus
+// step once per touch (keys never repeat). A flick too quick for
 // per-frame polling still lands: the release waits out a 120 ms minimum
 // hold. The recognizer only observes (cancelsTouchesInView = NO), so games
 // reading raw touches see the same stream as before.
@@ -358,24 +371,45 @@
 					action:@selector(godot_pan:)];
 	pan.cancelsTouchesInView = NO;
 	[self.view addGestureRecognizer:pan];
-	_pan_key = Key::NONE;
-	_pan_down_ms = 0;
-	_pan_gen = 0;
+	_pan_x.key = Key::NONE;
+	_pan_x.down_ms = 0;
+	_pan_x.gen = 0;
+	_pan_y.key = Key::NONE;
+	_pan_y.down_ms = 0;
+	_pan_y.gen = 0;
 }
 
-- (void)godot_hold_pan_key:(Key)key {
-	if (key == _pan_key) {
+- (void)godot_hold_pan_axis:(PanAxisHold *)axis key:(Key)key {
+	if (key == axis->key) {
 		return;
 	}
-	if (_pan_key != Key::NONE) {
-		DisplayServerAppleEmbedded::get_singleton()->key(_pan_key, 0, _pan_key, _pan_key, 0, false, KeyLocation::UNSPECIFIED);
+	if (axis->key != Key::NONE) {
+		DisplayServerAppleEmbedded::get_singleton()->key(axis->key, 0, axis->key, axis->key, 0, false, KeyLocation::UNSPECIFIED);
 	}
-	_pan_key = key;
+	axis->key = key;
 	if (key != Key::NONE) {
-		_pan_down_ms = OS::get_singleton()->get_ticks_msec();
-		_pan_gen++;
+		axis->down_ms = OS::get_singleton()->get_ticks_msec();
+		axis->gen++;
 		DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, true, KeyLocation::UNSPECIFIED);
 	}
+}
+
+- (void)godot_release_pan_axis:(PanAxisHold *)axis {
+	Key key = axis->key;
+	axis->key = Key::NONE;
+	if (key == Key::NONE) {
+		return;
+	}
+	uint64_t held = OS::get_singleton()->get_ticks_msec() - axis->down_ms;
+	uint64_t wait_ms = held >= 120 ? 0 : 120 - held;
+	uint64_t gen = axis->gen;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, wait_ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+		// A touch already down again owns its key; only the touch
+		// that pressed this one may release it.
+		if (gen == axis->gen && DisplayServerAppleEmbedded::get_singleton()) {
+			DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, false, KeyLocation::UNSPECIFIED);
+		}
+	});
 }
 
 - (void)godot_pan:(UIPanGestureRecognizer *)recognizer {
@@ -385,21 +419,8 @@
 	if (recognizer.state == UIGestureRecognizerStateEnded ||
 			recognizer.state == UIGestureRecognizerStateCancelled ||
 			recognizer.state == UIGestureRecognizerStateFailed) {
-		Key key = _pan_key;
-		_pan_key = Key::NONE;
-		if (key == Key::NONE) {
-			return;
-		}
-		uint64_t held = OS::get_singleton()->get_ticks_msec() - _pan_down_ms;
-		uint64_t wait_ms = held >= 120 ? 0 : 120 - held;
-		uint64_t gen = _pan_gen;
-		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, wait_ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-			// A touch already down again owns its key; only the touch
-			// that pressed this one may release it.
-			if (gen == _pan_gen && DisplayServerAppleEmbedded::get_singleton()) {
-				DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, false, KeyLocation::UNSPECIFIED);
-			}
-		});
+		[self godot_release_pan_axis:&_pan_x];
+		[self godot_release_pan_axis:&_pan_y];
 		return;
 	}
 	if (recognizer.state != UIGestureRecognizerStateBegan &&
@@ -407,17 +428,16 @@
 		return;
 	}
 	CGPoint pushed = [recognizer translationInView:self.view];
-	CGFloat sideways = fabs(pushed.x);
-	CGFloat along = fabs(pushed.y);
-	Key key = Key::NONE;
-	if (sideways > 24.0 || along > 24.0) {
-		if (sideways > along) {
-			key = pushed.x > 0 ? Key::RIGHT : Key::LEFT;
-		} else {
-			key = pushed.y > 0 ? Key::DOWN : Key::UP;
-		}
+	Key x_key = Key::NONE;
+	Key y_key = Key::NONE;
+	if (fabs(pushed.x) > 24.0) {
+		x_key = pushed.x > 0 ? Key::RIGHT : Key::LEFT;
 	}
-	[self godot_hold_pan_key:key];
+	if (fabs(pushed.y) > 24.0) {
+		y_key = pushed.y > 0 ? Key::DOWN : Key::UP;
+	}
+	[self godot_hold_pan_axis:&_pan_x key:x_key];
+	[self godot_hold_pan_axis:&_pan_y key:y_key];
 }
 #endif
 
