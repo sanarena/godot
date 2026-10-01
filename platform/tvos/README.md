@@ -35,24 +35,27 @@ scons platform=tvos target=template_release arch=arm64 simulator=yes opengl3=yes
 
 - **Compatibility renderer (OpenGL ES 3.0)** on device and simulator. This is
   the renderer to ship: it runs on every Apple TV including the A10X models.
-- **Siri Remote as key events**, on device and in the simulator. Trackpad
-  touches and clicks arrive as ordinary `InputEventKey`, so the default UI
-  navigation (`ui_up`/`ui_down`/`ui_left`/`ui_right`/`ui_accept`) and the
-  arrow/Enter bindings just work:
+- **Siri Remote as keys plus its own stick**, on device and in the simulator.
+  Clicks arrive as ordinary `InputEventKey`, so the default UI navigation
+  (`ui_up`/`ui_down`/`ui_left`/`ui_right`/`ui_accept`) and the arrow/Enter
+  bindings just work:
 
-  | Remote button | Godot key |
+  | Remote button | Godot event |
   |---|---|
-  | Touch dragged up / down / left / right, corners holding two (held until lift) | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
+  | Clickpad edge / D-pad | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
   | Click (Select) | `KEY_ENTER` |
   | Play/Pause | `KEY_MEDIAPLAY` |
   | Menu | `KEY_MENU` down/up, plus the go-back request (see below) |
+  | Touch drag | Left stick (`JOY_AXIS_LEFT_X`/`JOY_AXIS_LEFT_Y`) on device `-3` |
 
-  The remote is *not* exposed as a joystick (SDL remote-as-joystick is off),
-  so presses never arrive twice. MFi game controllers keep working through
-  the standard Godot joypad API. Each touch axis holds its arrow key until
-  the touch lifts, following the finger around (corners hold two keys);
-  menus step once per touch since keys never repeat, while a flick too
-  quick for per-frame polling still lands through a 120 ms minimum hold.
+  The touch steers like the stick the remote used to be: where the finger
+  is from where it landed becomes the deflection (full at 100 points out),
+  corners and all, zeroed on lift - so rounds walk the held way with a fine
+  aim while menus step through the stick bindings of the ui actions. The
+  stick rides the remote's own device (`-3`, games name it `Pads.REMOTE`),
+  which plain actions hear and no pad's scoped copy does; the remote is
+  *not* an SDL joystick, and clicks stay keys, so nothing arrives twice.
+  MFi game controllers keep working through the standard Godot joypad API.
 - **Menu button behavior.** With `quit_on_go_back` enabled (the default), the
   Menu press is handed back to UIKit, preserving the system Menu-to-Home flow.
   With it disabled, the app receives `KEY_MENU` going down, `KEY_MENU` going
@@ -119,9 +122,9 @@ All of the following was verified in Sep 2026 against this branch:
   Apple2 gate alerts, and a native probe characterizing `MTLSimDevice`
   (families, argument-buffer tier, heap behavior).
 - **Headless suite:** BubblyField `tests/tvos_remote_regression.gd`
-  (123 checks: input map, remote buttons, Menu key tap/hold case use,
-  pause/back routing, menu navigation, walking, bubbles, window
-  suspend/resume) passes.
+  (126 checks: input map, remote buttons, Menu key tap/hold case use,
+  remote stick routing, pause/back routing, menu navigation, walking,
+  bubbles, window suspend/resume) passes.
 - **Builds:** all four tvOS templates (release/debug x device/simulator,
   GLES3 + Metal) and the iOS release template compile cleanly.
 

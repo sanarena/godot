@@ -31,6 +31,8 @@
 #import "godot_view_controller.h"
 
 #include "core/config/project_settings.h"
+#include "core/input/input.h"
+#include "core/input/input_event.h"
 #import "drivers/apple_embedded/display_server_apple_embedded.h"
 #ifdef TVOS_ENABLED
 #import "drivers/apple_embedded/godot_keyboard_input_field.h"
@@ -50,16 +52,12 @@
 
 @interface GDTViewController () <GDTViewDelegate> {
 #ifdef TVOS_ENABLED
-	// What a touch-hold (see godot_pan:) keeps down per axis: the key, when it
-	// went down for the minimum hold, and which press that was, so a delayed
-	// release never lets go of a newer touch's key. NONE while held by nothing.
-	struct PanAxisHold {
-		Key key;
-		uint64_t down_ms;
-		uint64_t gen;
-	};
-	PanAxisHold _pan_x;
-	PanAxisHold _pan_y;
+	// The stick position (see godot_pan:) last sent for the touch down now,
+	// and whether one is down. Compared so a touch held still sends nothing
+	// more; the stick is zeroed when it lifts.
+	float _pan_last_x;
+	float _pan_last_y;
+	bool _pan_down;
 #endif
 }
 
@@ -286,6 +284,9 @@
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
 		DisplayServerAppleEmbedded::get_singleton()->key(keys[i], 0, keys[i], keys[i], 0, false, KeyLocation::UNSPECIFIED);
 	}
+#ifdef TVOS_ENABLED
+	[self godot_zero_pan_stick];
+#endif
 }
 #endif
 
@@ -354,73 +355,62 @@
 }
 
 #ifdef TVOS_ENABLED
-// Siri Remote touches arrive as gestures, not UIPresses, so the key
-// synthesis in pressesBegan never sees them: without this a swipe-only
-// remote (1st generation touch surface) cannot move at all, and clickpad
-// users lose the gesture tvOS itself navigates by. The touch steers like
-// the stick the remote used to be: each axis past 24 points from where it
-// landed holds its arrow key - both for a corner - following the finger
-// around until it lifts, so rounds keep walking the held way while menus
-// step once per touch (keys never repeat). A flick too quick for
-// per-frame polling still lands: the release waits out a 120 ms minimum
-// hold. The recognizer only observes (cancelsTouchesInView = NO), so games
-// reading raw touches see the same stream as before.
+// The touch steers like the stick the remote used to be: where the finger
+// is from where it landed becomes the left stick, corners and all, so
+// rounds walk the held way with a fine aim and menus step through the
+// stick bindings of the ui actions. Full deflection 100 points out;
+// zeroed when the touch lifts. The stick is nobody's pad: it rides device
+// -3, the remote's own seat (Pads.REMOTE in games), which plain actions
+// hear and no pad's scoped copy does. Clicks stay keys (pressesBegan), so
+// nothing arrives twice. The recognizer only observes
+// (cancelsTouchesInView = NO), so games reading raw touches see the same
+// stream as before.
+static const int GODOT_TV_REMOTE_STICK_DEVICE = -3; // Pads.REMOTE.
+static const float GODOT_TV_REMOTE_STICK_FULL_PT = 100.0f;
+
 - (void)godot_setupPanGesture {
 	UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
 			initWithTarget:self
 					action:@selector(godot_pan:)];
 	pan.cancelsTouchesInView = NO;
 	[self.view addGestureRecognizer:pan];
-	_pan_x.key = Key::NONE;
-	_pan_x.down_ms = 0;
-	_pan_x.gen = 0;
-	_pan_y.key = Key::NONE;
-	_pan_y.down_ms = 0;
-	_pan_y.gen = 0;
+	_pan_last_x = 0.0f;
+	_pan_last_y = 0.0f;
+	_pan_down = false;
 }
 
-- (void)godot_hold_pan_axis:(PanAxisHold *)axis key:(Key)key {
-	if (key == axis->key) {
+- (void)godot_send_pan_stick:(float)x y:(float)y {
+	Input *input = Input::get_singleton();
+	if (input == nullptr) {
 		return;
 	}
-	if (axis->key != Key::NONE) {
-		DisplayServerAppleEmbedded::get_singleton()->key(axis->key, 0, axis->key, axis->key, 0, false, KeyLocation::UNSPECIFIED);
+	const JoyAxis axes[2] = { JoyAxis::LEFT_X, JoyAxis::LEFT_Y };
+	const float values[2] = { x, y };
+	for (int i = 0; i < 2; i++) {
+		Ref<InputEventJoypadMotion> motion;
+		motion.instantiate();
+		motion->set_device(GODOT_TV_REMOTE_STICK_DEVICE);
+		motion->set_axis(axes[i]);
+		motion->set_axis_value(values[i]);
+		input->parse_input_event(motion);
 	}
-	axis->key = key;
-	if (key != Key::NONE) {
-		axis->down_ms = OS::get_singleton()->get_ticks_msec();
-		axis->gen++;
-		DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, true, KeyLocation::UNSPECIFIED);
-	}
+	_pan_last_x = x;
+	_pan_last_y = y;
 }
 
-- (void)godot_release_pan_axis:(PanAxisHold *)axis {
-	Key key = axis->key;
-	axis->key = Key::NONE;
-	if (key == Key::NONE) {
+- (void)godot_zero_pan_stick {
+	if (!_pan_down) {
 		return;
 	}
-	uint64_t held = OS::get_singleton()->get_ticks_msec() - axis->down_ms;
-	uint64_t wait_ms = held >= 120 ? 0 : 120 - held;
-	uint64_t gen = axis->gen;
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, wait_ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-		// A touch already down again owns its key; only the touch
-		// that pressed this one may release it.
-		if (gen == axis->gen && DisplayServerAppleEmbedded::get_singleton()) {
-			DisplayServerAppleEmbedded::get_singleton()->key(key, 0, key, key, 0, false, KeyLocation::UNSPECIFIED);
-		}
-	});
+	_pan_down = false;
+	[self godot_send_pan_stick:0.0f y:0.0f];
 }
 
 - (void)godot_pan:(UIPanGestureRecognizer *)recognizer {
-	if (!DisplayServerAppleEmbedded::get_singleton()) {
-		return;
-	}
 	if (recognizer.state == UIGestureRecognizerStateEnded ||
 			recognizer.state == UIGestureRecognizerStateCancelled ||
 			recognizer.state == UIGestureRecognizerStateFailed) {
-		[self godot_release_pan_axis:&_pan_x];
-		[self godot_release_pan_axis:&_pan_y];
+		[self godot_zero_pan_stick];
 		return;
 	}
 	if (recognizer.state != UIGestureRecognizerStateBegan &&
@@ -428,16 +418,12 @@
 		return;
 	}
 	CGPoint pushed = [recognizer translationInView:self.view];
-	Key x_key = Key::NONE;
-	Key y_key = Key::NONE;
-	if (fabs(pushed.x) > 24.0) {
-		x_key = pushed.x > 0 ? Key::RIGHT : Key::LEFT;
+	float x = CLAMP(pushed.x / GODOT_TV_REMOTE_STICK_FULL_PT, -1.0f, 1.0f);
+	float y = CLAMP(pushed.y / GODOT_TV_REMOTE_STICK_FULL_PT, -1.0f, 1.0f);
+	_pan_down = true;
+	if (fabsf(x - _pan_last_x) > 0.01f || fabsf(y - _pan_last_y) > 0.01f) {
+		[self godot_send_pan_stick:x y:y];
 	}
-	if (fabs(pushed.y) > 24.0) {
-		y_key = pushed.y > 0 ? Key::DOWN : Key::UP;
-	}
-	[self godot_hold_pan_axis:&_pan_x key:x_key];
-	[self godot_hold_pan_axis:&_pan_y key:y_key];
 }
 #endif
 
