@@ -52,12 +52,12 @@
 
 @interface GDTViewController () <GDTViewDelegate> {
 #ifdef TVOS_ENABLED
-	// The stick position (see godot_pan:) last sent for the touch down now,
-	// and whether one is down. Compared so a touch held still sends nothing
-	// more; the stick is zeroed when it lifts.
-	float _pan_last_x;
-	float _pan_last_y;
-	bool _pan_down;
+	// The stick position last sent for the remote's touch, and whether a
+	// nonzero one is out that lifting must zero. Compared so a touch held
+	// still sends nothing more.
+	float _stick_last_x;
+	float _stick_last_y;
+	bool _stick_down;
 #endif
 }
 
@@ -285,7 +285,7 @@
 		DisplayServerAppleEmbedded::get_singleton()->key(keys[i], 0, keys[i], keys[i], 0, false, KeyLocation::UNSPECIFIED);
 	}
 #ifdef TVOS_ENABLED
-	[self godot_zero_pan_stick];
+	[self godot_zero_remote_stick];
 #endif
 }
 #endif
@@ -346,7 +346,7 @@
 	[self observeKeyboard];
 	[self displayLoadingOverlay];
 #ifdef TVOS_ENABLED
-	[self godot_setupPanGesture];
+	[self godot_setupRemoteStick];
 #endif
 
 #ifndef TVOS_ENABLED
@@ -356,30 +356,57 @@
 
 #ifdef TVOS_ENABLED
 // The touch steers like the stick the remote used to be: where the finger
-// is from where it landed becomes the left stick, corners and all, so
-// rounds walk the held way with a fine aim and menus step through the
-// stick bindings of the ui actions. Full deflection 100 points out;
-// zeroed when the touch lifts. The stick is nobody's pad: it rides device
-// -3, the remote's own seat (Pads.REMOTE in games), which plain actions
-// hear and no pad's scoped copy does. Clicks stay keys (pressesBegan), so
-// nothing arrives twice. The recognizer only observes
-// (cancelsTouchesInView = NO), so games reading raw touches see the same
-// stream as before.
+// sits on the pad becomes the left stick, corners and all, so rounds walk
+// the held way with a fine aim and menus step through the stick bindings
+// of the ui actions. Read from the Siri Remote's own dpad, absolute -
+// holding a corner walks it with no drag first. The stick is nobody's
+// pad: it rides device -3, the remote's own seat (Pads.REMOTE in games),
+// which plain actions hear and no pad's scoped copy does. Clicks stay
+// keys (pressesBegan), so nothing arrives twice. A lift zeroes it, as
+// does unplugging (and the cancelled-presses path); a zero-duration
+// touch watcher backs the lift, so a missed up can never walk forever.
 static const int GODOT_TV_REMOTE_STICK_DEVICE = -3; // Pads.REMOTE.
-static const float GODOT_TV_REMOTE_STICK_FULL_PT = 100.0f;
 
-- (void)godot_setupPanGesture {
-	UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
+- (void)godot_setupRemoteStick {
+	[[NSNotificationCenter defaultCenter] addObserver:self
+											 selector:@selector(godot_remoteControllersChanged:)
+												 name:GCControllerDidConnectNotification
+											   object:nil];
+	[[NSNotificationCenter defaultCenter] addObserver:self
+											 selector:@selector(godot_remoteControllersChanged:)
+												 name:GCControllerDidDisconnectNotification
+											   object:nil];
+	UILongPressGestureRecognizer *touch = [[UILongPressGestureRecognizer alloc]
 			initWithTarget:self
-					action:@selector(godot_pan:)];
-	pan.cancelsTouchesInView = NO;
-	[self.view addGestureRecognizer:pan];
-	_pan_last_x = 0.0f;
-	_pan_last_y = 0.0f;
-	_pan_down = false;
+					action:@selector(godot_remoteTouch:)];
+	touch.minimumPressDuration = 0;
+	touch.cancelsTouchesInView = NO;
+	[self.view addGestureRecognizer:touch];
+	_stick_last_x = 0.0f;
+	_stick_last_y = 0.0f;
+	_stick_down = false;
+	[self godot_attachRemoteStick];
 }
 
-- (void)godot_send_pan_stick:(float)x y:(float)y {
+- (void)godot_remoteControllersChanged:(NSNotification *)notification {
+	[self godot_zero_remote_stick];
+	[self godot_attachRemoteStick];
+}
+
+- (void)godot_attachRemoteStick {
+	for (GCController *controller in [GCController controllers]) {
+		GCMicroGamepad *pad = controller.microGamepad;
+		if (pad == nil || controller.extendedGamepad != nil) {
+			continue; // The Siri Remote has a micro pad and no full one.
+		}
+		__weak typeof(self) weakSelf = self;
+		pad.dpad.valueChangedHandler = ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
+			[weakSelf godot_remoteStickMovedX:xValue y:-yValue];
+		};
+	}
+}
+
+- (void)godot_send_remote_stick:(float)x y:(float)y {
 	Input *input = Input::get_singleton();
 	if (input == nullptr) {
 		return;
@@ -394,35 +421,31 @@ static const float GODOT_TV_REMOTE_STICK_FULL_PT = 100.0f;
 		motion->set_axis_value(values[i]);
 		input->parse_input_event(motion);
 	}
-	_pan_last_x = x;
-	_pan_last_y = y;
+	_stick_last_x = x;
+	_stick_last_y = y;
+	_stick_down = (x != 0.0f || y != 0.0f);
 }
 
-- (void)godot_zero_pan_stick {
-	if (!_pan_down) {
+- (void)godot_zero_remote_stick {
+	if (!_stick_down) {
 		return;
 	}
-	_pan_down = false;
-	[self godot_send_pan_stick:0.0f y:0.0f];
+	[self godot_send_remote_stick:0.0f y:0.0f];
 }
 
-- (void)godot_pan:(UIPanGestureRecognizer *)recognizer {
+- (void)godot_remoteStickMovedX:(float)x y:(float)y {
+	if (fabsf(x - _stick_last_x) > 0.01f || fabsf(y - _stick_last_y) > 0.01f) {
+		[self godot_send_remote_stick:x y:y];
+	} else {
+		_stick_down = (x != 0.0f || y != 0.0f);
+	}
+}
+
+- (void)godot_remoteTouch:(UILongPressGestureRecognizer *)recognizer {
 	if (recognizer.state == UIGestureRecognizerStateEnded ||
 			recognizer.state == UIGestureRecognizerStateCancelled ||
 			recognizer.state == UIGestureRecognizerStateFailed) {
-		[self godot_zero_pan_stick];
-		return;
-	}
-	if (recognizer.state != UIGestureRecognizerStateBegan &&
-			recognizer.state != UIGestureRecognizerStateChanged) {
-		return;
-	}
-	CGPoint pushed = [recognizer translationInView:self.view];
-	float x = CLAMP(pushed.x / GODOT_TV_REMOTE_STICK_FULL_PT, -1.0f, 1.0f);
-	float y = CLAMP(pushed.y / GODOT_TV_REMOTE_STICK_FULL_PT, -1.0f, 1.0f);
-	_pan_down = true;
-	if (fabsf(x - _pan_last_x) > 0.01f || fabsf(y - _pan_last_y) > 0.01f) {
-		[self godot_send_pan_stick:x y:y];
+		[self godot_zero_remote_stick];
 	}
 }
 #endif
