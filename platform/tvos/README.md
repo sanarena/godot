@@ -39,7 +39,7 @@ Legend: ✅ tested on hardware/simulator or headless · ⚠️ implemented, susp
 |---|---|---|
 | Compatibility renderer (OpenGL ES 3.0), device + simulator | ✅ | The renderer to ship; runs on every Apple TV incl. A10X. Templates must be built with `opengl3=yes` (see above). Verified on Apple TV 4K 1st gen and simulator; all four templates compile. |
 | Siri Remote buttons as keys | ✅ | D-pad/clickpad edge → arrows, click (Select) → `KEY_ENTER`, Play/Pause → `KEY_MEDIAPLAY`, Menu → `KEY_MENU` down/up. Press + release verified on device with the exact keycodes below; default UI navigation and arrow/Enter bindings just work. |
-| Remote touch as its own left stick | ⚠️ | Finger position on the pad is the deflection (absolute, corners included), on device `-3` (`Pads.REMOTE` in games); zeroed on lift, disconnect, and cancelled presses. Plain actions hear it, no pad's scoped copy does. Covered by simulator runs and the headless remote suite — but the absolute-dpad rework landed after the Sep on-TV run, so on-TV confirmation of the current behavior is still pending. |
+| Remote touch as its own left stick | ✅ | Finger position on the pad is the deflection (absolute, corners included), on device `-3` (`Pads.REMOTE` in games); zeroed on lift, disconnect, and cancelled presses. Plain actions hear it, no pad's scoped copy does. Covered by simulator runs and the headless remote suite; on-TV steering confirmed working on hardware. |
 | No doubled input | ✅ | `SDL_HINT_TV_REMOTE_AS_JOYSTICK=0` (`drivers/sdl/joypad_sdl.cpp`): the remote never arrives as a joystick, clicks stay keys, so nothing reports twice. |
 | Menu behavior both ways | ✅ | `quit_on_go_back` on (default): press goes back to UIKit, preserving the system Menu-to-Home flow. Off: the app gets `KEY_MENU` down, `KEY_MENU` up, then `NOTIFICATION_WM_GO_BACK_REQUEST`, so taps and holds tell apart. Menu never doubles as a hardware key; hardware Escape reports as Menu and acts as one. Verified on device in both modes. |
 | Stuck-key release | ⚠️ | `pressesCancelled` releases every synthesized remote key and zeroes the stick (`drivers/apple_embedded/godot_view_controller.mm`), but no deterministic trigger for the path exists, so it is implemented yet untested. |
@@ -52,8 +52,8 @@ Legend: ✅ tested on hardware/simulator or headless · ⚠️ implemented, susp
 | End-to-end gameplay + regression | ✅ | BubblyField demo on device and simulator (login, Practice round, settings, bomb, blast, bricks, pickups, player damage, Defeat panel) plus `tests/tvos_remote_regression.gd` (127 checks) headless. |
 | Forward+/Mobile rendering on Apple4+ GPUs | ⚠️ | tvOS GPU-family/MSL profiles, the `appletvos` shader toolchain, and device capability detection are implemented, and the gate names the detected family instead of failing silently. But pixels were never exercised — no Apple4+ hardware (Apple TV 4K 2nd gen, 2021, or newer) was available. |
 | Physical MFi controllers | ⚠️ | Standard Godot joypad API path is kept (the SDL hint change is remote-specific); no physical MFi controller was available to test with. |
-| Audio (CoreAudio) | ⚠️ | Compiled in (`COREAUDIO_ENABLED`); gameplay runs with it, but no isolated audio probe on TV hardware was recorded. |
-| Networking / multiplayer sockets | ⚠️ | Standard UNIX socket path; online play was not exercised on TV hardware per the verification notes. |
+| Audio (CoreAudio) | ✅ | Tested and verified working on hardware — audio plays perfectly. Compiled in (`COREAUDIO_ENABLED`). |
+| Networking / multiplayer sockets | ✅ | Tested and verified working on hardware — networking/multiplayer plays perfectly. Standard UNIX socket path. |
 | HDR/EDR reporting | ⚠️ | Potential/current headroom reporting is implemented (`display_server_tvos.mm`); never exercised against an HDR display. |
 | C# / .NET templates | ⚠️ | Build flags list `mono` as supported, but no C# template was ever built or tested here. |
 | App Store submission | ⚠️ | Export output has not been through App Store validation. |
@@ -98,3 +98,6 @@ Sep–Oct 2026 against this branch:
   bubbles, suspend/resume) passes.
 - **Builds:** all four tvOS templates (release/debug × device/simulator,
   GLES3 + Metal) and the iOS release template compile cleanly.
+- **Hardware re-test (Oct 2026):** audio playback, remote-stick steering
+  on-TV, and networking/multiplayer all verified working perfectly on
+  hardware.
