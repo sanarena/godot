@@ -31,113 +31,70 @@ scons platform=tvos target=template_debug arch=arm64 simulator=yes opengl3=yes
 scons platform=tvos target=template_release arch=arm64 simulator=yes opengl3=yes
 ```
 
-## Supported
+## Feature status
 
-- **Compatibility renderer (OpenGL ES 3.0)** on device and simulator. This is
-  the renderer to ship: it runs on every Apple TV including the A10X models.
-- **Siri Remote as keys plus its own stick**, on device and in the simulator.
-  Clicks arrive as ordinary `InputEventKey`, so the default UI navigation
-  (`ui_up`/`ui_down`/`ui_left`/`ui_right`/`ui_accept`) and the arrow/Enter
-  bindings just work:
+Legend: ✅ tested on hardware/simulator or headless · ⚠️ implemented, suspected to work, not yet verified · ❌ not supported by design.
 
-  | Remote button | Godot event |
-  |---|---|
-  | Clickpad edge / D-pad | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
-  | Click (Select) | `KEY_ENTER` |
-  | Play/Pause | `KEY_MEDIAPLAY` |
-  | Menu | `KEY_MENU` down/up, plus the go-back request (see below) |
-  | Touch drag | Left stick (`JOY_AXIS_LEFT_X`/`JOY_AXIS_LEFT_Y`) on device `-3` |
+| Feature | Status | Details |
+|---|---|---|
+| Compatibility renderer (OpenGL ES 3.0), device + simulator | ✅ | The renderer to ship; runs on every Apple TV incl. A10X. Templates must be built with `opengl3=yes` (see above). Verified on Apple TV 4K 1st gen and simulator; all four templates compile. |
+| Siri Remote buttons as keys | ✅ | D-pad/clickpad edge → arrows, click (Select) → `KEY_ENTER`, Play/Pause → `KEY_MEDIAPLAY`, Menu → `KEY_MENU` down/up. Press + release verified on device with the exact keycodes below; default UI navigation and arrow/Enter bindings just work. |
+| Remote touch as its own left stick | ⚠️ | Finger position on the pad is the deflection (absolute, corners included), on device `-3` (`Pads.REMOTE` in games); zeroed on lift, disconnect, and cancelled presses. Plain actions hear it, no pad's scoped copy does. Covered by simulator runs and the headless remote suite — but the absolute-dpad rework landed after the Sep on-TV run, so on-TV confirmation of the current behavior is still pending. |
+| No doubled input | ✅ | `SDL_HINT_TV_REMOTE_AS_JOYSTICK=0` (`drivers/sdl/joypad_sdl.cpp`): the remote never arrives as a joystick, clicks stay keys, so nothing reports twice. |
+| Menu behavior both ways | ✅ | `quit_on_go_back` on (default): press goes back to UIKit, preserving the system Menu-to-Home flow. Off: the app gets `KEY_MENU` down, `KEY_MENU` up, then `NOTIFICATION_WM_GO_BACK_REQUEST`, so taps and holds tell apart. Menu never doubles as a hardware key; hardware Escape reports as Menu and acts as one. Verified on device in both modes. |
+| Stuck-key release | ⚠️ | `pressesCancelled` releases every synthesized remote key and zeroes the stick (`drivers/apple_embedded/godot_view_controller.mm`), but no deterministic trigger for the path exists, so it is implemented yet untested. |
+| Quit hardening | ✅ | `SceneTree.quit()` is a warned no-op (`scene/main/scene_tree.cpp`): Apple forbids programmatic termination, so the main loop keeps running and the system suspends the app. Verified: frame counter advances after `quit()`. |
+| Persistent storage | ✅ | `user://` maps to the app's `Library/Caches`; the tvOS sandbox denies file creation in `Documents`. Verified: writes succeed and round-trip to the Mac. |
+| Text entry | ✅ | Standard virtual-keyboard API backed by a hidden text field (no always-on keyboard view like iOS); Menu-dismissable. Exercised via login navigation in end-to-end gameplay. |
+| Export packaging | ✅ | Parallax `.imagestack` app icons (400x240 home + 1280x768 App Store marketing rendition), Top Shelf images (1920x720 + 2320x720 wide), Apple-TV-retargeted launch storyboard, tvOS-cleaned `Info.plist` (iOS-only keys dropped). Options with no tvOS meaning (camera, microphone, photo library, Files access) are hidden. Verified: export + sim build, icon renders on the home screen. |
+| Honest display features | ✅ | Reports no touchscreen, no clipboard, no orientation changes (`platform/tvos/display_server_tvos.mm`); refresh rate from the screen (60 in Low Power mode), content scale from the window scene. Process spawning (`OS.execute`, `OS.create_process`) fails with `ERR_UNAVAILABLE`. |
+| Oversize GLES3 textures | ✅ | Textures larger than `GL_MAX_TEXTURE_SIZE` are downscaled with a logged warning instead of sampling black (`drivers/gles3/storage/texture_storage.cpp`). Found via a 6801px sprite sheet showing as a black box on tvOS while fine on desktop GPUs. |
+| End-to-end gameplay + regression | ✅ | BubblyField demo on device and simulator (login, Practice round, settings, bomb, blast, bricks, pickups, player damage, Defeat panel) plus `tests/tvos_remote_regression.gd` (127 checks) headless. |
+| Forward+/Mobile rendering on Apple4+ GPUs | ⚠️ | tvOS GPU-family/MSL profiles, the `appletvos` shader toolchain, and device capability detection are implemented, and the gate names the detected family instead of failing silently. But pixels were never exercised — no Apple4+ hardware (Apple TV 4K 2nd gen, 2021, or newer) was available. |
+| Physical MFi controllers | ⚠️ | Standard Godot joypad API path is kept (the SDL hint change is remote-specific); no physical MFi controller was available to test with. |
+| Audio (CoreAudio) | ⚠️ | Compiled in (`COREAUDIO_ENABLED`); gameplay runs with it, but no isolated audio probe on TV hardware was recorded. |
+| Networking / multiplayer sockets | ⚠️ | Standard UNIX socket path; online play was not exercised on TV hardware per the verification notes. |
+| HDR/EDR reporting | ⚠️ | Potential/current headroom reporting is implemented (`display_server_tvos.mm`); never exercised against an HDR display. |
+| C# / .NET templates | ⚠️ | Build flags list `mono` as supported, but no C# template was ever built or tested here. |
+| App Store submission | ⚠️ | Export output has not been through App Store validation. |
+| Other tvOS versions | ⚠️ | Tested on tvOS 26.x (device) and 26.5–27 (simulator) only. |
+| Forward+/Mobile on Apple1–3 GPUs | ❌ | Apple TV HD and Apple TV 4K 1st gen lack the required features; only Compatibility runs there. The gate stops with an alert naming the detected family. |
+| Metal rendering in the simulator | ❌ | `MTLSimDevice` reports only Apple1/Apple2 with tier-1 argument buffers, no image cube arrays, and aborting shared placement heaps, so the gate always stops it. Simulator apps must use Compatibility. |
+| Vulkan | ❌ | Forced off in `platform/tvos/detect.py`. |
+| Touchscreen, clipboard, orientation | ❌ | Reported as unsupported by `has_feature`; there is no touch screen, clipboard, or orientation change on tvOS. |
+| Camera, mic recording, photo library, Files app | ❌ | No tvOS meaning and no template libraries; export options hidden, `Info.plist` keys dropped. |
+| Process spawning | ❌ | Prohibited by the sandbox (`drivers/unix/os_unix.cpp`); fails with `ERR_UNAVAILABLE`. |
 
-  The touch steers like the stick the remote used to be: where the finger
-  sits on the pad becomes the deflection, absolute - holding a corner
-  walks it with no drag first, the middle rests - corners and all, zeroed
-  on lift. So rounds walk the held way with a fine aim while menus step
-  through the stick bindings of the ui actions. The stick rides the
-  remote's own device (`-3`, games name it `Pads.REMOTE`), which plain
-  actions hear and no pad's scoped copy does; the remote is *not* an SDL
-  joystick, and clicks stay keys, so nothing arrives twice. MFi game
-  controllers keep working through the standard Godot joypad API.
-- **Menu button behavior.** With `quit_on_go_back` enabled (the default), the
-  Menu press is handed back to UIKit, preserving the system Menu-to-Home flow.
-  With it disabled, the app receives `KEY_MENU` going down, `KEY_MENU` going
-  up, and then `NOTIFICATION_WM_GO_BACK_REQUEST`
-  (the `WINDOW_EVENT_GO_BACK_REQUEST` window event) instead of suspending,
-  so taps and holds tell apart. Menu never doubles as a hardware key: a
-  hardware Escape reports as Menu too, and acts as one. Stuck keys are
-  released if the system takes the press stream (`pressesCancelled`).
-- **Metal renderer profiles (Forward+/Mobile).** The tvOS GPU-family/MSL
-  profiles, the `appletvos` shader toolchain, and device capability detection
-  are implemented. On GPUs older than Apple family 4 the engine shows an
-  alert naming the detected family (e.g. "this GPU reports Apple3") instead
-  of failing with an empty feature list. Simulator templates keep Metal
-  enabled and fail gracefully at the same gate.
-- **Quit hardening.** `SceneTree.quit()` is a warned no-op on tvOS (and the
-  other Apple embedded platforms): Apple forbids programmatic termination,
-  so the main loop keeps running and the system suspends the app. Games
-  leave through the Menu flow above, never through `quit()`.
-- **Persistent storage.** `user://` maps to the app's `Library/Caches`: the
-  tvOS sandbox denies file creation in `Documents`, so a Documents-backed
-  `user://` breaks on first write on device.
-- **Text entry** through the standard virtual keyboard API (backed by a
-  hidden text field; no always-on-screen keyboard view like iOS).
-- **Export**: parallax `.imagestack` app icons, Top Shelf images, an
-  Apple-TV-retargeted launch storyboard, and a tvOS-cleaned `Info.plist`
-  (iOS-only keys dropped). Export options with no tvOS meaning (camera,
-  microphone, photo library, Files app access) are hidden.
-- Display features report honestly: no touchscreen, no clipboard, no
-  orientation changes. Process spawning (`OS.execute`, `OS.create_process`)
-  is prohibited by the sandbox and fails with `ERR_UNAVAILABLE`.
+### Remote input map
 
-## Not supported
+| Remote button | Godot event |
+|---|---|
+| Clickpad edge / D-pad | `KEY_UP` / `KEY_DOWN` / `KEY_LEFT` / `KEY_RIGHT` |
+| Click (Select) | `KEY_ENTER` |
+| Play/Pause | `KEY_MEDIAPLAY` |
+| Menu | `KEY_MENU` down/up, plus the go-back request (see above) |
+| Touch drag | Left stick (`JOY_AXIS_LEFT_X`/`JOY_AXIS_LEFT_Y`) on device `-3` |
 
-- **Forward+/Mobile rendering on Apple1-3 GPUs** (Apple TV HD and Apple TV
-  4K 1st generation). The hardware lacks the required features; only the
-  Compatibility renderer runs there. Forward+/Mobile needs an Apple4+ GPU
-  (Apple TV 4K 2nd generation, 2021, and newer).
-- **Metal rendering in the simulator.** `MTLSimDevice` ("Apple tvOS
-  simulator GPU") only reports Apple1/Apple2 with tier-1 argument buffers
-  and no image cube arrays, and shared placement heaps abort, so the gate
-  always stops it. Simulator apps must use the Compatibility renderer.
-- Vulkan, .NET, touchscreen, clipboard, orientation changes, camera,
-  microphone recording, photo library, and Files app integration.
+On a pad, X is a bubble button; on the remote, the same physical press is
+Play/Pause and opens the case/settings instead (see `Scripts/pads.gd` in
+games). Menu is back and nothing else — never a bubble.
 
-## Verified on hardware
+### Last verified
 
-All of the following was verified in Sep 2026 against this branch:
+Sep–Oct 2026 against this branch:
 
-- **Apple TV 4K 1st generation (A10X, tvOS 26.6), device builds:**
-  - Siri Remote 6-button matrix: every button arrives with press+release and
-    the exact keycodes from the table above (Play/Pause = `MEDIAPLAY`),
-    with zero joystick events.
-  - Menu with `quit_on_go_back` true and false: app stays in the foreground
-    in both modes; with it false, `GO_BACK_REQUEST` is delivered to the
-    scene tree (log-verified, not just state-asserted).
-  - `quit()` leaves the main loop running (frame counter advances).
-  - Forward+ and Mobile probes show the Apple3 gate alert.
-  - `user://` file writes succeed and round-trip back to the Mac.
-  - End-to-end gameplay (BubblyField demo): login navigation, Practice
-    round, Play/Pause and Menu settings open/close, Select bomb, blast
-    breaking bricks with pickups, player damage, Defeat panel.
-- **tvOS 27 simulator (Mac):** BubblyField practice round (login, settings
-  toggle, bomb, blast, bricks, player caught), quit probe alive, FP/Mobile
-  Apple2 gate alerts, and a native probe characterizing `MTLSimDevice`
-  (families, argument-buffer tier, heap behavior).
-- **Headless suite:** BubblyField `tests/tvos_remote_regression.gd`
-  (127 checks: input map, remote buttons, Menu key tap/hold case use,
-  request-alone Menu fallback, remote stick routing, pause/back routing,
-  menu navigation, walking, bubbles, window suspend/resume) passes.
-- **Builds:** all four tvOS templates (release/debug x device/simulator,
+- **Apple TV 4K 1st generation (A10X, tvOS 26.x), device builds:** 6-button
+  remote matrix with press + release and the exact keycodes above; Menu in
+  both `quit_on_go_back` modes with `GO_BACK_REQUEST` delivered to the scene
+  tree (log-verified); `quit()` leaves the main loop running; Forward+ and
+  Mobile probes show the Apple3 gate alert; `user://` round-trip to the Mac;
+  end-to-end BubblyField gameplay.
+- **tvOS 26.5–27 simulator (Mac):** BubblyField practice round, quit probe,
+  Forward+/Mobile Apple2 gate alerts, and a native `MTLSimDevice` capability
+  probe.
+- **Headless:** BubblyField `tests/tvos_remote_regression.gd` (127 checks:
+  input map, remote buttons, Menu tap/hold case use, request-fallback Menu,
+  remote stick routing, pause/back routing, menu navigation, walking,
+  bubbles, suspend/resume) passes.
+- **Builds:** all four tvOS templates (release/debug × device/simulator,
   GLES3 + Metal) and the iOS release template compile cleanly.
-
-## Not yet verified
-
-- Forward+/Mobile actual rendering on an Apple4+ Apple TV (no such hardware
-  available; profiles, toolchain query, linking, and gating are verified,
-  pixels are not).
-- Physical MFi controllers (no hardware available; the SDL hint change is
-  remote-specific by API).
-- The `pressesCancelled` stuck-key path (no deterministic trigger exists).
-- Touch-hold-until-lift and `KEY_MENU` tap/hold on a physical remote (both
-  ship in this branch; headless-covered, on-TV confirmation pending).
-- App Store submission and validation of an exported tvOS app.
-- tvOS versions other than the tested 26.x device / 26.5–27 simulators.
