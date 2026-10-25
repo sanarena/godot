@@ -178,7 +178,7 @@ Full details live in [`platform/tvos/README.md`](platform/tvos/README.md); that 
 | Oversize GLES3 textures | ✅ | Textures larger than `GL_MAX_TEXTURE_SIZE` are downscaled with a logged warning instead of sampling black (`drivers/gles3/storage/texture_storage.cpp`). Found via a 6801px sprite sheet showing as a black box on tvOS while fine on desktop GPUs. |
 | End-to-end gameplay + regression | ✅ | BubblyField demo on device and simulator (login, Practice round, settings, bomb, blast, bricks, pickups, player damage, Defeat panel) plus `tests/tvos_remote_regression.gd` (127 checks) headless. |
 | Forward+/Mobile rendering on Apple4+ GPUs | ⚠️ | tvOS GPU-family/MSL profiles, the `appletvos` shader toolchain, and device capability detection are implemented, and the gate names the detected family instead of failing silently. But pixels were never exercised — no Apple4+ hardware (Apple TV 4K 2nd gen, 2021, or newer) was available. |
-| Physical MFi controllers | ⚠️ | Standard Godot joypad API path is kept (the SDL hint change is remote-specific); no physical MFi controller was available to test with. |
+| Physical MFi controllers (PS5 DualSense) | ✅ | Standard Godot joypad API path; tested and verified working on hardware with a PS5 DualSense controller. |
 | Audio (CoreAudio) | ✅ | Tested and verified working on hardware — audio plays perfectly. Compiled in (`COREAUDIO_ENABLED`). |
 | Networking / multiplayer sockets | ✅ | Tested and verified working on hardware — networking/multiplayer plays perfectly. Standard UNIX socket path. |
 | HDR/EDR reporting | ⚠️ | Potential/current headroom reporting is implemented (`display_server_tvos.mm`); never exercised against an HDR display. |
